@@ -1,0 +1,203 @@
+---
+title: ""
+author: ""
+date: ""
+output: html_document
+---
+```{r, include=FALSE}
+
+library(readr)
+library(knitr)
+library(dplyr)
+library(poolr)
+library(kableExtra)
+library(STAAR)
+
+#---------------FUNCTION TO PICK MIN. p-VALUE SNPs and MAKE TABLE-----------
+make_table <- function(haplin_results, LD_matrix, prune_list, lead_SNPs, caption){
+  haplin_results <- na.omit(haplin_results)
+  df <- haplin_results %>% group_by(region2) %>% filter(snp %in% lead_SNPs)
+
+  df <- haplin_results[haplin_results$snp %in% prune_list, ] %>% group_by(region2) %>% summarise(fisher = fisher(pval)$p) %>%
+    left_join(df , . , by="region2")
+  
+  df <- haplin_results %>% group_by(region2) %>% 
+    summarise(Cauchy = CCT(pval),
+              Empirical = fisher(pval, adjust="empirical", R = LD_matrix[unname(snp), unname(snp)])$p) %>%
+    left_join(df , . , by="region2")
+  
+  df <- df[order(df$pval),]
+  
+  df$CauchyFDR = p.adjust(df$Cauchy, method="fdr")
+  df$FisherFDR = p.adjust(df$fisher, method="fdr")
+  df$EmpiricalFDR = p.adjust(df$Empirical, method="fdr")
+  
+  # df <- df %>% mutate(across(c("pval","qval","pooled","pooled_nyholt","pooled_brown","mean_LD"), format, scipen=3, digits=2))
+  df <- df %>% mutate(across(c("pval", "Cauchy", "fisher", "Empirical", "CauchyFDR", "FisherFDR", "EmpiricalFDR"), format, scipen=3, digits=2))
+  allele <- strsplit(df$snp, ":")
+  allele <- paste(sapply(allele,"[",3),sapply(allele,"[",4),sep="/")
+  allele <- paste(allele, " (", round(df$maf,2), ")", sep = "")
+  df$allele <- allele
+  df$gene <- NA
+  df$RR <- paste0(round(df$no_env_RR,2), " [", round(df$no_env_RRl,2), ", ", round(df$no_env_RRu, 2), "] ", "/", 
+                  round(df$env_RR, 2),   " [", round(df$env_RRl, 2),   ", ", round(df$env_RRu, 2), "]")
+  
+  names = c("region", "rsid", "SNP pval", "Cauchy", "Empirical", "Fisher", "RR (no env/ env)")
+  kable(df[,c("region2", "rsid", "pval", "Cauchy", "Empirical", "fisher", "RR")], col.names = names, format = "html") %>% kable_styling(full_width=TRUE)
+}
+
+load("mat.Rdata")
+load("p_origin.Rdata")
+mat <- mat[mat$impute > 0.8, ]
+p_origin <- p_origin[p_origin$impute > 0.8, ]
+load("m_LD1.Rdata")
+load("p_LD1.Rdata")
+
+m_keep <- read_table("maternal.in", col_names = FALSE)[[1]]
+p_keep <- read_table("p_origin.in", col_names=FALSE)[[1]]
+
+```
+
+#### OFC Maternal x Folic acid
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# haplin_results <- read_table("../../NewAnalyses/New_Cleft_Haplin_Analysis/Input_and_Output_Files/maternal_folate_OFC_haplin.txt")
+haplin_results <- read_csv("../../NewAnalyses/New_Cleft_Haplin_Analysis/Haplin_Results_and_Graphs/maternal_folate_OFC_haplin.csv")
+haplin_results <- merge(mat, haplin_results[,c("snp", "gxe_folate_mat", "no_env_mat_RR", "no_env_mat_lo", "no_env_mat_up", "env_mat_RR", "env_mat_lo", "env_mat_up")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_folate_mat', 'no_env_RR'='no_env_mat_RR',
+                         'no_env_RRl'='no_env_mat_lo', 'no_env_RRu'='no_env_mat_up',
+                         'env_RR'='env_mat_RR', 'env_RRl'='env_mat_lo', 'env_RRu'='env_mat_up')
+
+lead_SNPs <- haplin_results %>% group_by(region) %>% filter(pval==min(pval)) %>% pull(snp)
+make_table(haplin_results, m_LD1, m_keep, lead_SNPs, "Maternal x Folic acid supplementation")
+
+```
+
+#### CLPP Maternal x Folic acid
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# haplin_results <- read_table("../../NewAnalyses/New_Cleft_Haplin_Analysis/Input_and_Output_Files/maternal_folate_OFC_haplin.txt")
+haplin_results <- read_csv("../../NewAnalyses/New_Cleft_Haplin_Analysis/Haplin_Results_and_Graphs/maternal_folate_CLPP_haplin.csv")
+haplin_results <- merge(mat, haplin_results[,c("snp", "gxe_folate_mat", "no_env_mat_RR", "no_env_mat_lo", "no_env_mat_up", "env_mat_RR", "env_mat_lo", "env_mat_up")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_folate_mat', 'no_env_RR'='no_env_mat_RR',
+                         'no_env_RRl'='no_env_mat_lo', 'no_env_RRu'='no_env_mat_up',
+                         'env_RR'='env_mat_RR', 'env_RRl'='env_mat_lo', 'env_RRu'='env_mat_up')
+make_table(haplin_results, m_LD1, m_keep, lead_SNPs, "Maternal x Folic acid supplementation")
+```
+
+#### CPO Maternal x Folic acid
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# haplin_results <- read_table("../../NewAnalyses/New_Cleft_Haplin_Analysis/Input_and_Output_Files/maternal_folate_OFC_haplin.txt")
+haplin_results <- read_csv("../../NewAnalyses/New_Cleft_Haplin_Analysis/Haplin_Results_and_Graphs/maternal_folate_CPO_haplin.csv")
+haplin_results <- merge(mat, haplin_results[,c("snp", "gxe_folate_mat", "no_env_mat_RR", "no_env_mat_lo", "no_env_mat_up", "env_mat_RR", "env_mat_lo", "env_mat_up")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_folate_mat', 'no_env_RR'='no_env_mat_RR',
+                         'no_env_RRl'='no_env_mat_lo', 'no_env_RRu'='no_env_mat_up',
+                         'env_RR'='env_mat_RR', 'env_RRl'='env_mat_lo', 'env_RRu'='env_mat_up')
+make_table(haplin_results, m_LD1, m_keep, lead_SNPs,  "Maternal x Folic acid supplementation")
+```
+
+#### OFC Maternal x Smoking
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# haplin_results <- read_table("../../NewAnalyses/New_Cleft_Haplin_Analysis/Input_and_Output_Files/maternal_smoke_OFC_haplin.txt")
+haplin_results <- read_csv("../../NewAnalyses/New_Cleft_Haplin_Analysis/Haplin_Results_and_Graphs/maternal_smoke_OFC_haplin.csv")
+haplin_results <- merge(mat, haplin_results[,c("snp", "gxe_smoke_mat", "no_env_mat_RR", "no_env_mat_lo", "no_env_mat_up", "env_mat_RR", "env_mat_lo", "env_mat_up")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_smoke_mat', 'no_env_RR'='no_env_mat_RR',
+                         'no_env_RRl'='no_env_mat_lo', 'no_env_RRu'='no_env_mat_up',
+                         'env_RR'='env_mat_RR', 'env_RRl'='env_mat_lo', 'env_RRu'='env_mat_up')
+lead_SNPs <- haplin_results %>% group_by(region) %>% filter(pval==min(pval)) %>% pull(snp)
+make_table(haplin_results, m_LD1, m_keep, lead_SNPs, "Maternal x smoking")
+```
+
+#### CLPP Maternal x Smoking
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# haplin_results <- read_table("../../NewAnalyses/New_Cleft_Haplin_Analysis/Input_and_Output_Files/maternal_smoke_CLPP_haplin.txt")
+haplin_results <- read_csv("../../NewAnalyses/New_Cleft_Haplin_Analysis/Haplin_Results_and_Graphs/maternal_smoke_CLPP_haplin.csv")
+haplin_results <- merge(mat, haplin_results[,c("snp", "gxe_smoke_mat", "no_env_mat_RR", "no_env_mat_lo", "no_env_mat_up", "env_mat_RR", "env_mat_lo", "env_mat_up")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_smoke_mat', 'no_env_RR'='no_env_mat_RR',
+                         'no_env_RRl'='no_env_mat_lo', 'no_env_RRu'='no_env_mat_up',
+                         'env_RR'='env_mat_RR', 'env_RRl'='env_mat_lo', 'env_RRu'='env_mat_up')
+make_table(haplin_results, m_LD1, m_keep,  lead_SNPs, "Maternal x smoking")
+```
+
+#### CPO Maternal x Smoking
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# haplin_results <- read_table("../../NewAnalyses/New_Cleft_Haplin_Analysis/Input_and_Output_Files/maternal_smoke_CPO_haplin.txt")
+haplin_results <- read_csv("../../NewAnalyses/New_Cleft_Haplin_Analysis/Haplin_Results_and_Graphs/maternal_smoke_CPO_haplin.csv")
+haplin_results <- merge(mat, haplin_results[,c("snp", "gxe_smoke_mat", "no_env_mat_RR", "no_env_mat_lo", "no_env_mat_up", "env_mat_RR", "env_mat_lo", "env_mat_up")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_smoke_mat', 'no_env_RR'='no_env_mat_RR',
+                         'no_env_RRl'='no_env_mat_lo', 'no_env_RRu'='no_env_mat_up',
+                         'env_RR'='env_mat_RR', 'env_RRl'='env_mat_lo', 'env_RRu'='env_mat_up')
+make_table(haplin_results, m_LD1, m_keep,  lead_SNPs, "Maternal x smoking")
+```
+
+#### OFC Parent of Origin x Folic acid
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+haplin_results <- read_csv("../../NewAnalyses/New_Cleft_Haplin_Analysis/Haplin_Results_and_Graphs/parental_folate_OFC_haplin.csv")
+haplin_results <- merge(p_origin, haplin_results[,c("snp", "gxe_folate_poo", "no_env_poo_RR", "no_env_poo_lo", "no_env_poo_up", "env_poo_RR", "env_poo_lo", "env_poo_up")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_folate_poo', 'no_env_RR'='no_env_poo_RR',
+                         'no_env_RRl'='no_env_poo_lo', 'no_env_RRu'='no_env_poo_up',
+                         'env_RR'='env_poo_RR', 'env_RRl'='env_poo_lo', 'env_RRu'='env_poo_up')
+lead_SNPs <- haplin_results %>% group_by(region) %>% filter(pval==min(pval)) %>% pull(snp)
+make_table(haplin_results, p_LD1, p_keep, lead_SNPs, "Parent of Origin x Folic acid supplementation")
+```
+
+#### CLPP Parent of Origin x Folic acid
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+haplin_results <- read_csv("../../NewAnalyses/New_Cleft_Haplin_Analysis/Haplin_Results_and_Graphs/parental_folate_CLPP_haplin.csv")
+haplin_results <- merge(p_origin, haplin_results[,c("snp", "gxe_folate_poo", "no_env_poo_RR", "no_env_poo_lo", "no_env_poo_up", "env_poo_RR", "env_poo_lo", "env_poo_up")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_folate_poo', 'no_env_RR'='no_env_poo_RR',
+                         'no_env_RRl'='no_env_poo_lo', 'no_env_RRu'='no_env_poo_up',
+                         'env_RR'='env_poo_RR', 'env_RRl'='env_poo_lo', 'env_RRu'='env_poo_up')
+make_table(haplin_results, p_LD1, p_keep, lead_SNPs, "Parent of Origin x Folic acid supplementation")
+```
+
+#### CPO Parent of Origin x Folic acid
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+haplin_results <- read_csv("../../NewAnalyses/New_Cleft_Haplin_Analysis/Haplin_Results_and_Graphs/parental_folate_CPO_haplin.csv")
+haplin_results <- merge(p_origin, haplin_results[,c("snp", "gxe_folate_poo", "no_env_poo_RR", "no_env_poo_lo", "no_env_poo_up", "env_poo_RR", "env_poo_lo", "env_poo_up")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_folate_poo', 'no_env_RR'='no_env_poo_RR',
+                         'no_env_RRl'='no_env_poo_lo', 'no_env_RRu'='no_env_poo_up',
+                         'env_RR'='env_poo_RR', 'env_RRl'='env_poo_lo', 'env_RRu'='env_poo_up')
+make_table(haplin_results, p_LD1, p_keep, lead_SNPs, "Parent of Origin x Folic acid supplementation")
+```
+
+#### OFC Parent of Origin x Smoking
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+haplin_results <- read_csv("../../NewAnalyses/New_Cleft_Haplin_Analysis/Haplin_Results_and_Graphs/parental_smoke_OFC_haplin.csv")
+haplin_results <- merge(p_origin, haplin_results[,c("snp", "gxe_smoke_poo", "no_env_poo_RR", "no_env_poo_lo", "no_env_poo_up", "env_poo_RR", "env_poo_lo", "env_poo_up")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_smoke_poo', 'no_env_RR'='no_env_poo_RR',
+                         'no_env_RRl'='no_env_poo_lo', 'no_env_RRu'='no_env_poo_up',
+                         'env_RR'='env_poo_RR', 'env_RRl'='env_poo_lo', 'env_RRu'='env_poo_up')
+lead_SNPs <- haplin_results %>% group_by(region) %>% filter(pval==min(pval)) %>% pull(snp)
+make_table(haplin_results, p_LD1, p_keep, lead_SNPs, "Parent of Origin x Smoking")
+```
+
+#### CLPP Parent of Origin x Smoking
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+haplin_results <- read_csv("../../NewAnalyses/New_Cleft_Haplin_Analysis/Haplin_Results_and_Graphs/parental_smoke_CLPP_haplin.csv")
+haplin_results <- merge(p_origin, haplin_results[,c("snp", "gxe_smoke_poo", "no_env_poo_RR", "no_env_poo_lo", "no_env_poo_up", "env_poo_RR", "env_poo_lo", "env_poo_up")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_smoke_poo', 'no_env_RR'='no_env_poo_RR',
+                         'no_env_RRl'='no_env_poo_lo', 'no_env_RRu'='no_env_poo_up',
+                         'env_RR'='env_poo_RR', 'env_RRl'='env_poo_lo', 'env_RRu'='env_poo_up')
+make_table(haplin_results, p_LD1, p_keep, lead_SNPs, "Parent of Origin x Smoking")
+```
+
+#### CPO Parent of Origin x Smoking
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+haplin_results <- read_csv("../../NewAnalyses/New_Cleft_Haplin_Analysis/Haplin_Results_and_Graphs/parental_smoke_CPO_haplin.csv")
+haplin_results <- merge(p_origin, haplin_results[,c("snp", "gxe_smoke_poo", "no_env_poo_RR", "no_env_poo_lo", "no_env_poo_up", "env_poo_RR", "env_poo_lo", "env_poo_up")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_smoke_poo', 'no_env_RR'='no_env_poo_RR',
+                         'no_env_RRl'='no_env_poo_lo', 'no_env_RRu'='no_env_poo_up',
+                         'env_RR'='env_poo_RR', 'env_RRl'='env_poo_lo', 'env_RRu'='env_poo_up')
+make_table(haplin_results, p_LD1, p_keep, lead_SNPs, "Parent of Origin x Smoking")
+```

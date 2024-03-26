@@ -1,0 +1,162 @@
+---
+title: ""
+output: html_document
+date: ""
+---
+
+```{r setup, include=FALSE}
+
+library(ggplot2)
+library(ggsci)
+library(dplyr)
+
+my_theme <- function()
+{
+  res <- theme(
+    plot.title = element_text(hjust=0),
+    plot.title.position = "plot",
+    axis.ticks.x = element_blank(),
+    axis.title.x = element_blank(),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dotted", color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    legend.position = "bottom")
+  res
+}
+
+load("../p_origin.Rdata")
+
+```
+
+### Chr1 maternal folic acid interaction  
+
+Almost all SNPs in this region had GTEx entries. GTEx data is shown for the highlighted SNPs. The RSIDs on the x-axis of the eQTL plots are in order of BP position (so they match left-to-right the highlighted SNPs)
+
+```{r, echo=FALSE}
+load("../mat.Rdata")
+load("../m_LD1.Rdata")
+
+mat <- mat[mat$chr == 1,]
+chr1_GTEx <- read.table("chr1_GTEx.txt", header=TRUE, sep='\t', quote="")
+positions <- sapply(strsplit(chr1_GTEx[,3], ":"), "[[", 2)
+positions <- as.numeric(positions)
+chr1_GTEx <- chr1_GTEx[positions %in% mat$position,]
+mat$rsid[mat$position %in% positions] <- unique(chr1_GTEx$RS.ID)
+
+m_LD1 <- m_LD1[rownames(m_LD1) %in% mat$snp, colnames(m_LD1) %in% mat$snp]
+lead  <- mat %>% slice_min(folate) %>% pull(snp)
+mat$LD<- m_LD1[,lead]^2
+
+keep <- (-log10(mat$folate) > 2) & (mat$LD > 0.8)
+
+p1 <- ggplot(mat, aes(position, -log10(folate))) +
+    geom_point(color="grey") +
+    geom_point(data=mat[keep,], aes(position, -log10(folate), color=LD)) +
+    # geom_text(data=mat[keep,], aes(position, y=3, label=rsid), nudge_y=0.5, angle=30) +
+    scale_colour_stepsn(breaks = c(0.4, 0.6, 0.8), colours = pal_locuszoom("default")(5)) + 
+    ylim(c(0,5)) + labs(y="-log10(pval)") +my_theme() +
+    theme(axis.text.x=element_blank())
+
+chr1_GTEx <- chr1_GTEx[chr1_GTEx$RS.ID %in% mat[keep,]$rsid,]
+chr1_GTEx$RS.ID <- factor(chr1_GTEx$RS.ID, levels=unique(chr1_GTEx$RS.ID))
+
+p2 <- ggplot(chr1_GTEx, aes(x=RS.ID, y=-log10(P.value), fill=Tissue)) + 
+    geom_col(position=position_dodge2()) + facet_wrap(vars(Gene.Symbol), ncol =2) +
+    theme(axis.text.x =element_text(angle=90),
+          axis.title.x=element_blank(),
+          legend.position = "bottom") +
+    my_theme()
+
+p1
+p2  + labs(title="GTEx expression data for highlighted SNPs")
+# cowplot::plot_grid(p1,p2, ncol=1, rel_heights = c(1,3), labels=c("A","B"))
+```
+
+### Chr2 133Mb Parent-of-origin Smoking interaction  
+
+Only 3 SNPs in this region were present in GTEx v8
+
+```{r, echo=FALSE}
+load("../p_origin.Rdata")
+load("../p_LD1.Rdata")
+
+chr2 <- p_origin[p_origin$chr== 2, ]
+chr2_GTEx <- read.table("chr2_GTEx.txt", header=TRUE, sep='\t', quote="")
+positions <- sapply(strsplit(chr2_GTEx[,3], ":"), "[[", 2)
+positions <- as.numeric(positions)
+chr2_GTEx <- chr2_GTEx[positions %in% chr2$position,]
+chr2$rsid[chr2$position %in% positions] <- unique(chr2_GTEx$RS.ID)
+
+keep <- chr2$rsid %in% chr2_GTEx$RS.ID
+
+p1 <- ggplot(chr2, aes(position, -log10(smoke))) +
+    geom_point(color="grey") +
+    geom_point(data=chr2[keep,], aes(position, -log10(smoke)), color="red") +
+    # geom_text(data=mat[keep,], aes(position, y=3, label=rsid), nudge_y=0.5, angle=30) +
+    # scale_colour_stepsn(breaks = c(0.4, 0.6, 0.8), colours = pal_locuszoom("default")(5)) + 
+    ylim(c(0,5)) + labs(y="-log10(pval)") +my_theme() +
+    theme(axis.text.x=element_blank(), legend.position = "none")
+
+chr2_GTEx$RS.ID <- factor(chr2_GTEx$RS.ID, levels=unique(chr2_GTEx$RS.ID))
+
+p2 <- ggplot(chr2_GTEx, aes(x=RS.ID, y=-log10(P.value), fill=Tissue)) + 
+    geom_col(position=position_dodge2()) + facet_wrap(vars(Gene.Symbol), ncol =2) +
+    theme(axis.text.x =element_text(angle=90),
+          axis.title.x=element_blank()) +
+    my_theme()
+
+p1  
+p2  + labs(title="GTEx expression data for highlighted SNPs")
+# cowplot::plot_grid(p1,p2, ncol=1, rel_heights = c(1,3), labels=c("A","B"))
+```
+
+### Chr14 76.1Mb Parent-of-origin folic acid interaction  
+
+Many SNPs in this region had entries in GTEx v8. GTEx data is shown for the highlighted SNPs.
+
+```{r, echo=FALSE}
+load("../p_origin.Rdata")
+load("../p_LD1.Rdata")
+
+p_origin   <- p_origin[p_origin$region == "chr14\nr14",]
+chr14_GTEx <- read.table("chr14_GTEx.txt", header=TRUE, sep='\t', quote="")
+positions <- sapply(strsplit(chr14_GTEx[,3], ":"), "[[", 2)
+positions <- as.numeric(positions)
+
+chr14_GTEx <- chr14_GTEx[positions %in% p_origin$position,]
+p_LD1 <- p_LD1[rownames(p_LD1) %in% p_origin$snp, colnames(p_LD1) %in% p_origin$snp]
+lead  <- p_origin %>% slice_min(folate) %>% pull(snp)
+p_origin$LD<- unname(p_LD1[,lead[1]]^2)
+
+keep <- (-log10(p_origin$folate) > 2) & (p_origin$LD > 0.5)
+
+p1 <- ggplot(p_origin, aes(position, -log10(folate))) +
+  geom_point(color="grey") +
+  geom_point(data=p_origin[keep,], color="red") +
+  ylim(c(0,5)) + labs(y="-log10(pval)") +my_theme() +
+  theme(axis.text.x=element_blank())
+
+keep <- positions %in% p_origin$position[keep]
+chr14_GTEx$RS.ID <- factor(chr14_GTEx$RS.ID, levels=unique(chr14_GTEx$RS.ID))
+
+p2 <- ggplot(chr14_GTEx[keep,], aes(x=RS.ID, y=-log10(P.value), fill=Tissue)) + 
+    geom_col(position=position_dodge2()) + facet_wrap(vars(Gene.Symbol)) +
+    my_theme() + 
+    theme(axis.text.x =element_text(angle=90),
+          axis.title.x=element_blank(),
+          legend.box.margin = margin(0,10,0,10)) +
+   guides(fill = guide_legend(ncol = 3))
+
+# legend <- cowplot::get_legend(p2)
+# p2 <- cowplot::plot_grid(p2 + my_theme() + theme(legend.position = "none"), legend, ncol=1)
+
+p1  
+p2  + labs(title="GTEx expression data for highlighted SNPs")
+# cowplot::plot_grid(p1,p2, ncol=1, rel_heights = c(1,3), labels=c("A","B"))
+```
+
+
+
+
+

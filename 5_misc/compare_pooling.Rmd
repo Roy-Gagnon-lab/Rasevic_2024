@@ -1,0 +1,259 @@
+---
+title: "correlation matrix used for pooling"
+author: ""
+date: ""
+output: html_document
+---
+### Compare using r2 instead of r as the correlation matrix for poolr methods. Here the r and r2 matrix are directly from sample genotype counts (plink). When comparing to the R matrix from the "genetics" package (from the sample estimated haplotype frequencies) there is minimal difference.   
+
+```{r, include=FALSE}
+
+library(readr)
+library(knitr)
+library(dplyr)
+library(poolr)
+library(ggnewscale)
+library(ggplot2)
+# library(matrixcalc)
+# library(kableExtra)
+# library(STAAR)
+
+#---------------FUNCTION TO PICK MIN. p-VALUE SNPs and MAKE TABLE-----------
+make_table <- function(haplin_results, LD_matrix, caption, prune_list){
+  haplin_results <- na.omit(haplin_results)
+  pruned_results <- haplin_results[haplin_results$snp %in% prune_list,]
+
+  SNP_list <- rownames(LD_matrix)
+  df <- haplin_results %>% group_by(region) %>% filter(pval == min(pval))
+  df <- haplin_results %>% group_by(region) %>% summarise (Nyholt = fisher(pval, adjust="nyholt", R = LD_matrix[unname(snp), unname(snp)])$p,
+                                                           Brown  = fisher(pval, adjust="generalized", R = LD_matrix[unname(snp), unname(snp)])$p,
+                                                           Cauchy = CCT(pval),
+                                                           PD = is.positive.definite(LD_matrix[unname(snp), unname(snp)])) %>%
+    left_join(df, . , by="region")
+  
+  df <- pruned_results %>% group_by(region) %>% summarise(Fisher = fisher(pval)$p, Cauchy_prune = CCT(pval)) %>%
+    left_join(df, . , by="region")
+
+  df <- df %>% mutate(across(c("pval", "Nyholt", "Brown", "Cauchy", "Fisher", "Cauchy_prune"), format, digits=2))
+  names=c("region", "min. SNP", "Fisher(no adj)", "Brown", "Nyholt", "Cauchy", "Cauchy_pruned")
+  kable(df[,c("region", "pval", "Fisher","Brown","Nyholt", "Cauchy", "Cauchy_prune")], col.names=names, caption=caption) %>% kable_styling() %>% row_spec(which(!(df$PD)), bold = T)
+}
+
+#-----------GGPLOT THEME------------------
+my_theme <- function()
+{
+  res <- theme(
+    axis.ticks.x = element_blank(),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dotted", color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    legend.position="bottom")
+  res
+}
+
+#------------PLOTTING FUNCTION-----------------
+make_plot <- function(df, LD_matrix){
+  df <- na.omit(df)
+
+  df <- df[order(df$chr, df$position),]
+  #add a distance column to help plot the x-axis
+  df <- df %>% group_by(region) %>% summarise(start_BP = min(position)) %>% left_join(df , . , by=c("region"="region"))
+  df$distance <- df$position - df$start_BP
+  increment <- (df %>% group_by(region) %>% summarise(increment = max(distance)))$increment
+  increment <- c(0, head(increment, -1) + 1000)
+  increment <- cumsum(increment)
+  df$distance <- df$distance + rep(increment, as.vector(table(df$region)))
+  
+  #put the x axis labels in the right spot, and extra points to display in new layer (pooled p-values)
+  xaxis <- df %>% group_by(region) %>% 
+    summarise(center=(max(distance) + min(distance))/2)
+  
+  extra_layer <- df %>% group_by(region) %>% 
+    summarise (Nyholt = fisher(pval, adjust="nyholt", R = LD_matrix[unname(snp), unname(snp)])$p,
+               Brown = fisher(pval, adjust="generalized", R = mvnconv(LD_matrix[unname(snp), unname(snp)]))$p,
+               LD = "R")
+  
+  extra_layer <- df %>% group_by(region) %>% 
+    summarise(Nyholt = fisher(pval, adjust="nyholt", R = LD_matrix[unname(snp), unname(snp)]^2)$p,
+               Brown  = fisher(pval, adjust="generalized", R = mvnconv(LD_matrix[unname(snp), unname(snp)]^2))$p,
+               LD = "R2") %>% 
+    bind_rows(extra_layer, . )
+  
+  extra_layer <- extra_layer %>% tidyr::pivot_longer(!c(region, LD), names_to="pooled", values_to="pval")
+  extra_layer <- xaxis %>% left_join(extra_layer, . , by="region")
+
+  p <-ggplot(df, aes(x=distance, y=-log10(pval))) + #ggplot(df, aes(x=distance, y=-log10(pval), text=text)) + #
+    geom_point(aes(color=region, alpha=0.7)) +
+    geom_hline(yintercept=-log10(0.05), linetype="dashed", color = "black") +
+    geom_hline(yintercept=-log10(0.05/length(unique(df$region))), linetype="dashed", color = "black") +
+    scale_color_manual(values=rep(c("#DF8F4499","#79AF9799"), length(unique(df$region))/2 + 1)) +
+    guides(color="none", alpha="none") +
+    new_scale_colour() +
+    geom_point(data=extra_layer, aes(x=center, y=-log10(pval), shape=pooled, color=LD)) +
+    scale_x_continuous(label=xaxis$region, breaks=xaxis$center) +
+    my_theme() + labs(x="region", shape="", color="")
+  # ggplotly(p,tooltip="text")
+  return(p)
+}
+
+#------------PLOTTING FUNCTION 2----------
+make_plot2 <- function(df, LD_matrix, LD_matrix2){
+  df <- na.omit(df)
+  df <- df[order(df$chr, df$position),]
+  #add a distance column to help plot the x-axis
+  df <- df %>% group_by(region) %>% summarise(start_BP = min(position)) %>% left_join(df , . , by=c("region"="region"))
+  df$distance <- df$position - df$start_BP
+  increment <- (df %>% group_by(region) %>% summarise(increment = max(distance)))$increment
+  increment <- c(0, head(increment, -1) + 1000)
+  increment <- cumsum(increment)
+  df$distance <- df$distance + rep(increment, as.vector(table(df$region)))
+  
+  #put the x axis labels in the right spot, and extra points to display in new layer (pooled p-values)
+  xaxis <- df %>% group_by(region) %>% 
+    summarise(center=(max(distance) + min(distance))/2)
+  
+  extra_layer <- df %>% group_by(region) %>% 
+    summarise (Nyholt = fisher(pval, adjust="nyholt", R = LD_matrix[unname(snp), unname(snp)])$p,
+               Brown  = fisher(pval, adjust="generalized", R = mvnconv(LD_matrix[unname(snp), unname(snp)]))$p,
+               LD = "plink")
+  
+  extra_layer <- df %>% group_by(region) %>% 
+    summarise(Nyholt = fisher(pval, adjust="nyholt", R = LD_matrix2[unname(snp), unname(snp)])$p,
+               Brown  = fisher(pval, adjust="generalized", R = mvnconv(LD_matrix2[unname(snp), unname(snp)]))$p,
+               LD = "EUR") %>% 
+    bind_rows(extra_layer, . )
+  
+  extra_layer <- extra_layer %>% tidyr::pivot_longer(!c(region, LD), names_to="pooled", values_to="pval")
+  extra_layer <- xaxis %>% left_join(extra_layer, . , by="region")
+  
+      # xaxis$pooled[xaxis$PD] <- NA                                             
+  p <-ggplot(df, aes(x=distance, y=-log10(pval))) + #ggplot(df, aes(x=distance, y=-log10(pval), text=text)) + #
+    geom_point(aes(color=region, alpha=0.7)) +
+    geom_hline(yintercept=-log10(0.05), linetype="dashed", color = "black") +
+    geom_hline(yintercept=-log10(0.05/length(unique(df$region))), linetype="dashed", color = "black") +
+    scale_color_manual(values=rep(c("#DF8F4499","#79AF9799"), length(unique(df$region))/2 + 1)) +
+    guides(color="none", alpha="none") +
+    new_scale_colour() +
+    geom_point(data=extra_layer, aes(x=center, y=-log10(pval), shape=pooled, color=LD)) +
+    scale_x_continuous(label=xaxis$region, breaks=xaxis$center) +
+    my_theme()  + labs(x="region", shape="", color="")
+  # ggplotly(p,tooltip="text")
+  return(p)
+}
+```
+
+```{r, include=FALSE, cache=TRUE}
+# get_region <- function(chr, position){
+#   region_table[region_table$lower <= position & region_table$upper >= position & region_table$chr==chr,"region"]
+# }
+
+#---------------READ DATA (MATERNAL SNPs, LD MATRIX)-------------------------
+# mat <- read_table("../../NewAnalyses/New_Cleft_Haplin_Analysis/Input_and_Output_Files/mat_info.txt")
+# mat <- mat[order(mat$chr, mat$position),]
+# m_keep <- read_table("maternal.in", col_names = FALSE)[[1]]
+# 
+# lower = c(69678758,235042180,7486515,59985799,81105402,7726510,29878959,128190108,24070089,52512510,92079711,36821827,18626795)
+# upper = c(69698758,235062249,7506515,60005799,81125402,7746510,29898959,128210108,24090089,52532510,92099711,36841827,18646795)
+# region= c('chr1\nr1','chr2\nr2/3','chr3\nr4','chr3\nr5','chr5\nr6','chr6\nr7','chr10\nr8','chr10\nr9','chr13\nr10','chr14\nr11','chr14\nr12','chr17\nr13','chr19\nr14')
+# region = factor(region, levels=region)
+# chr   = c(1,2,3,3,5,6,10,10,13,14,14,17,19)
+# region_table <- data.frame(lower=lower, upper=upper, region=region, chr=chr)
+# 
+# mat$region <- mapply(get_region, mat$chr, mat$position)
+# # mat_LD_matrix <- as.matrix(read_tsv("./maternal.ld", col_names=FALSE))
+# load("m_LD1.Rdata")
+# mat_LD_matrix <- m_LD1
+# rownames(mat_LD_matrix) <- mat$snp
+# colnames(mat_LD_matrix) <- mat$snp
+#--------------READ DATA (POO SNPs, LD MATRIX) -------------------------------
+# p_origin <- read_table("../../NewAnalyses/New_Cleft_Haplin_Analysis/Input_and_Output_Files/poo_info.txt")
+# p_keep <- read_table("p_origin.in", col_names=FALSE)[[1]]
+# p_origin <- p_origin[order(p_origin$chr, p_origin$position),]
+# 
+# region = c('chr1\nr1','chr1\nr2','chr1\nr3','chr1\nr4','chr2\nr5','chr4\nr6/7','chr5\nr8','chr6\nr9','chr8\nr10','chr9\nr11','chr9\nr12','chr12\nr13','chr14\nr14','chr14\nr15/16','chr16\nr17')
+# region = factor(region, levels=region)
+# lower = c(147285381,187573533,187602171,213633968,133004085,124177929,2328794,110487644,3920208,2055892,84780297,95870912,76111457,88243254,19225202)
+# upper = c(147305381,187593533,187622171,213653968,133024085,124209102,2348794,110507644,3940208,2075892,84800297,95890912,76131457,88264564,19245202)
+# chr   = c(1,1,1,1,2,4,5,6,8,9,9,12,14,14,16)
+# region_table <- data.frame(lower=lower, upper=upper, region=region, chr=chr)
+# p_origin$region <- mapply(get_region, p_origin$chr, p_origin$position)
+# 
+# # p_LD_matrix <- as.matrix(read_tsv("./p_origin.ld", col_names=FALSE))
+# load("p_LD1.Rdata")
+# p_LD_matrix <- p_LD1
+# rownames(p_LD_matrix) <- p_origin$snp
+# colnames(p_LD_matrix) <- p_origin$snp
+# 
+# #--- ref panel LD
+# load("m_LD2.Rdata")
+# names(m_LD) <- unique(mat$region)
+# load("p_LD2.Rdata")
+# names(p_LD) <- unique(p_origin$region)
+#--------------Load pre-processed .Rdata--------
+load("mat.Rdata")
+load("p_origin.Rdata")
+load("m_LD1.Rdata")
+load("m_LD2.Rdata")
+load("p_LD1.Rdata")
+load("p_LD2.Rdata")
+```
+
+  
+  
+#### Maternal GxE folic acid. r vs. r2 (from plink)
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+haplin_results <- read_table("../../NewAnalyses/New_Cleft_Haplin_Analysis/Input_and_Output_Files/maternal_folate_OFC_haplin.txt")
+haplin_results <- merge(mat, haplin_results[,c("snp", "gxe_folate_mat", "maf", "no_env_mat_RR", "env_mat_RR")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_folate_mat', 'no_env_RR'='no_env_mat_RR', 'env_RR'='env_mat_RR')
+make_plot(haplin_results, m_LD1)
+# make_table(haplin_results, mat_LD_matrix, "Environment: Folic acid supplementation", m_keep)
+```
+
+#### Maternal GxE folic acid. plink r vs. ref panel r.
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+make_plot2(haplin_results, m_LD1, sqrt(m_LD2)*sign(m_LD1))
+```
+
+##### Maternal GxE smoking
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+haplin_results <- read_table("../../NewAnalyses/New_Cleft_Haplin_Analysis/Input_and_Output_Files/maternal_smoke_OFC_haplin.txt")
+haplin_results <- merge(mat, haplin_results[,c("snp", "gxe_smoke_mat", "maf", "no_env_mat_RR", "env_mat_RR")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_smoke_mat', 'no_env_RR'='no_env_mat_RR', 'env_RR'='env_mat_RR')
+# make_table(haplin_results, mat_LD_matrix, "Environment: Smoking", m_keep)
+make_plot(haplin_results, m_LD1)
+```
+
+#### Maternal GxE smoking.
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+make_plot2(haplin_results, m_LD1, sqrt(m_LD2)*sign(m_LD1))
+```
+
+#### parent of origin folic acid. 
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+haplin_results <- read_table("../../NewAnalyses/New_Cleft_Haplin_Analysis/Input_and_Output_Files/parental_folate_OFC_haplin.txt")
+haplin_results <- merge(p_origin, haplin_results[,c("snp", "gxe_folate_poo", "maf", "env_poo_RR", "no_env_poo_RR")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_folate_poo', 'no_env_RR'='no_env_poo_RR', 'env_RR'='env_poo_RR')
+# make_table(haplin_results, p_LD_matrix, "Environment: Folic acid supplementation", p_keep)
+make_plot(haplin_results, p_LD1)
+```
+
+#### parent of origin folic acid. reference panel vs. sample R.
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+make_plot2(haplin_results, p_LD1, p_LD2)
+```
+
+#### parent of origin smoking
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+haplin_results <- read_table("../../NewAnalyses/New_Cleft_Haplin_Analysis/Input_and_Output_Files/parental_smoke_OFC_haplin.txt")
+haplin_results <- merge(p_origin, haplin_results[,c("snp", "gxe_smoke_poo", "maf", "env_poo_RR", "no_env_poo_RR")], by="snp")
+haplin_results <- rename(haplin_results, 'pval'='gxe_smoke_poo', 'no_env_RR'='no_env_poo_RR', 'env_RR'='env_poo_RR')
+# make_table(haplin_results, p_LD_matrix, "Environment: Smoking", p_keep)
+make_plot(haplin_results, p_LD1)
+```
+
+#### parent of origin smoking
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+make_plot2(haplin_results, p_LD1, p_LD2)
+```
+
